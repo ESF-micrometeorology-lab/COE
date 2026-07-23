@@ -1,0 +1,20 @@
+name: WeeklyReport
+
+on:
+  schedule: 
+    - cron: '0 12 * * 5'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: action/checkout@v2
+      - uses: action/setup-python@v2
+        with:
+          python-version: 3.x
+      - name: Run email code
+        env: 
+          USER_EMAIL: ${{ secrets.CHANEY_EMAIL}}
+          USER_PASSWORD: ${{ secrets.USER_PASSWORD}}
+        run: python send_email.py
