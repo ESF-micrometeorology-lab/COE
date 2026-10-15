@@ -1,0 +1,159 @@
+
+# Daily Blob Upload Code
+# Author: Chaney Finkeldei
+# Created: 8/27/2026
+# Last updated: 10/1/2026
+
+# This code checks for newly uploaded files, adds them to the azure blob container, 
+# and adds their name to a log of uploaded files. This code should be set to run daily
+# on task manager.
+
+
+import os
+import time
+import csv
+import sys
+from datetime import datetime, timedelta
+from azure.storage.blob import BlobServiceClient
+
+# -- Configuration -- 
+# Login details for blob
+connection_string =  ${{ secrets.AZURE_CONNECTION_STRING}}
+container_name = "field-data" 
+
+# Directory where files are located
+root_directory = "D:Data"
+# Log files path
+log_file_path = "D:Data/data_log"
+# Set the threhold of days that will be checked for new fiels
+day_threshold = 7
+
+
+# Function to create/ read a log of files that have been uploaded to blob
+def load_uploaded_log(log_path):
+
+    # Create a list of files that have been uploaded
+    uploaded_files = set()
+
+    # Open log and add files to the list
+    if os.path.exists(log_path):
+        with open(log_path, mode = "r", newline = "", encoding = "utf-8") as f:
+
+            print("Log found!")
+            # Read CSV file
+            reader = csv.reader(f)
+
+            # Skip the header row
+            header = next(reader, None)
+
+            # Read names of files in log into data set
+            for row in reader:
+                if row:
+                    uploaded_files.add( row[0])
+
+    # If the log doesn't exist, print that it couldn't be found and stop the script
+    else:
+        print("Log not found")
+        sys.exit()
+
+    return uploaded_files
+
+# Function to add a newly uploaded file name and uploaded time to the CSV log
+def append_to_log(log_path, relative_path):
+
+    # Get the current time
+    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    print("Appending to log...")
+
+    # Add a row to the log
+    with open (log_path, mode = "a", newline="", encoding= "utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow([relative_path, current_time])
+
+
+# Main function
+def main():
+
+    # Connect to blob account
+    blob_service_client = BlobServiceClient.from_connection_string(connection_string)
+    container_client = blob_service_client.get_container_client(container_name)
+
+    print("Connected to blob")
+
+    # Starting a timer
+    start_time = time.time()
+        
+    # Set a variable to keep track of how many files are processed
+    files_processed = 0
+
+    # Grab the log of files that have been uploaded
+    uploaded_set = load_uploaded_log(log_file_path)
+
+    # Set a cut off time of files to look at 
+    cutoff_time = datetime.now() - timedelta(days = day_threshold)
+
+    # Use os.walk to loop through all site files
+    for folder_path, subfolders, files in os.walk(root_directory):
+        for file_name in files:
+    
+            # Find new .dat files that haven't been uploaded
+            if file_name.endswith('.dat'):
+
+                local_file_path = os.path.join(folder_path, file_name)
+
+                # Find the time the file was uploaded
+                file_mtime = datetime.fromtimestamp(os.path.getmtime(local_file_path))
+
+                # If it was uploaded more than 7 days ago, skip it
+                if file_mtime < cutoff_time:
+                    continue
+
+                # Keep relative path strucutre in the blob
+                relative_path = os.path.relpath(local_file_path, root_directory)
+
+                # change slashes
+                clean_path = relative_path.replace("\\","/")
+
+                # Make sure it has forward slashes
+                blob_name = f"Data/{clean_path}"
+
+                # If the file is in the log, skip it
+                if blob_name in uploaded_set:
+                    continue
+
+                print(f"Uploading {local_file_path}")
+
+                # Push to blob
+                with open(local_file_path, mode = "rb") as data:
+                    blob_client = container_client.upload_blob(
+                        name = blob_name, data = data, overwrite = True)
+
+                # Append to log
+                append_to_log(log_file_path, blob_name)
+
+                # Add count to files processed
+                files_processed += 1
+
+    # End timer
+    end_time = time.time()
+
+    print (f"Daily batch upload completed: {files_processed} files were uploaded")
+
+    # Calculate and formate run time
+    run_time = round(end_time - start_time, 3)
+
+    # Print run time
+    print(f"Run time: {run_time} seconds")
+
+    # Print divider so you can easily tell between this day and the last
+    print("-" * 50)
+
+
+if __name__ == "__main__":
+    main()
+
+
+
+
+                            
